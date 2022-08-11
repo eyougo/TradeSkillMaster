@@ -251,7 +251,7 @@ function GUI:EventHandler(event, ...)
 		elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
 			-- local unit, _, _, _, spellID = ... -- parameter ... doesn't provide spellID in 3.3.5a
 			local unit, spellName = ...
-			local spellID = TSM.SpellName2ID[spellName]
+			local spellID = TSM.SpellName2ID(spellName)
 
 			if spellID == nil then
 				TSM:Printf("Could not find spellID for %s", spellName)
