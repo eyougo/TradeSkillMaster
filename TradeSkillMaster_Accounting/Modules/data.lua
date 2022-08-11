@@ -375,7 +375,7 @@ function Data:ScanCollectedMail(oFunc, attempt, index, subIndex)
 
 	local quantity = 0
 	for j = 1, ATTACHMENTS_MAX_RECEIVE do
-		quantity = select(3, GetInboxItem(index, j))
+		quantity = quantity + select(3, GetInboxItem(index, j))
 	end
 	if quantity == 0 then
 		quantity = 1
