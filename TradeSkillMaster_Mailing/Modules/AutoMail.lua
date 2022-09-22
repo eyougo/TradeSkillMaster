@@ -17,13 +17,14 @@ function AutoMail:OnEnable()
 	AutoMail:RegisterEvent("MAIL_CLOSED", private.StopSending)
 end
 
-function AutoMail:SendItems(items, target, callback, codPerItem)
+function AutoMail:SendItems(items, target, callback, codPerItem, money)
 	if private.isSending or TSMAPI:IsPlayer(target) or not MailFrame:IsVisible() then return end
 	private.isSending = true
 	private.items = items
 	private.target = target
 	private.callback = callback
 	private.codPerItem = codPerItem
+	private.money = money
 	private.waitingLocations = {}
 	TSMAPI:CreateTimeDelay("mailingSendDelay", 0, private.SendNextMail, TSM.db.global.sendDelay)
 	return true
@@ -50,41 +51,64 @@ function private:SendNextMail()
 
 	-- send off any pending items
 	private:SendOffMail()
-	
-	-- fill the mail with the next batch of items
-	local bagsFull = private:FillMail()
-	if #private.waitingLocations > 0 then return end
-	
-	-- check if anything was actually put in the mail to be sent
-	if private:GetNumPendingAttachments() == 0 then
-		-- we're done
-		if bagsFull then
-			TSM:Printf(L["Could not send mail due to not having free bag space available to split a stack of items."])
+
+	if next(private.items) then
+		-- fill the mail with the next batch of items
+		local bagsFull = private:FillMail()
+		if #private.waitingLocations > 0 then return end
+
+		-- check if anything was actually put in the mail to be sent
+		if private:GetNumPendingAttachments() == 0 then
+			-- we're done
+			if bagsFull then
+				TSM:Printf(L["Could not send mail due to not having free bag space available to split a stack of items."])
+			end
+			private:StopSending()
+			return
 		end
+	elseif not private.money or private.money == 0 then
 		private:StopSending()
 		return
 	end
+
+	private:FillMailMoney()
 	
 	-- send off this mail
 	private:SendOffMail()
 end
 
+function private:FillMailMoney()
+	if private.money and private.money > 0 then
+		SetSendMailMoney(private.money)
+		private.money = 0
+	else
+		SetSendMailMoney(0)
+	end
+end
+
 function private:SendOffMail()
 	local attachments = private:GetNumPendingAttachments()
-	if attachments == 0 or not private.target then return end
+	local money = GetSendMailMoney()
+	if attachments == 0 and money == 0 then return end
+	if not private.target then return end
 	SendMailNameEditBox:SetText(private.target)
-	SetSendMailMoney(0)
-	if private.codPerItem then
-		local numItems = 0
-		for i=1, ATTACHMENTS_MAX_SEND do
-			local count = select(3, GetSendMailItem(i))
-			numItems = numItems + count
+	if money == 0 then
+		if private.codPerItem then
+			local numItems = 0
+			for i=1, ATTACHMENTS_MAX_SEND do
+				local count = select(3, GetSendMailItem(i))
+				numItems = numItems + count
+			end
+			SetSendMailCOD(private.codPerItem*numItems)
+		else
+			SetSendMailCOD(0)
 		end
-		SetSendMailCOD(private.codPerItem*numItems)
-	else
-		SetSendMailCOD(0)
 	end
-	SendMail(private.target, SendMailSubjectEditBox:GetText() or "TSM_Mailing", "")
+	local subject = SendMailSubjectEditBox:GetText()
+	if (not subject or strlen(subject) == 0) and money > 0 then
+		subject = TSMAPI:FormatTextMoney(money)
+	end
+	SendMail(private.target, subject or "TSM_Mailing", "")
 	if TSM.db.global.sendMessages then
 		local items = {}
 		for i=1, attachments do
@@ -102,13 +126,18 @@ function private:SendOffMail()
 		end
 		local msg = ""
 		local cod = GetSendMailCOD()
-		if cod and cod > 0 then
+		local money = GetSendMailMoney()
+		if cod and cod > 0 and next(temp) then
 			msg = format(L["Sent %s to %s with a COD of %s."], table.concat(temp, ", "), private.target, TSMAPI:FormatTextMoney(cod))
-		else
+		elseif next(temp) and money and money > 0 then
+			msg = format(L["Sent %s and money %s to %s."], table.concat(temp, ", "), TSMAPI:FormatTextMoney(money), private.target)
+		elseif next(temp) then
 			msg = format(L["Sent %s to %s."], table.concat(temp, ", "), private.target)
+		else
+			msg = format(L["Sent money %s to %s."], TSMAPI:FormatTextMoney(money), private.target)
 		end
 		local function DoPrint()
-			if private:GetNumPendingAttachments() > 0 then return end
+			if private:GetNumPendingAttachments() > 0 or (private.money and private.money > 0) then return end
 			TSMAPI:CancelFrame("sendMailPrintDelay")
 			TSM:Printf(msg)
 		end
@@ -229,6 +258,7 @@ function private:StopSending()
 	private.isSending = nil
 	private.items = nil
 	private.target = nil
+	private.money = 0
 	private.waitingLocations = {}
 	private.callback()
 end

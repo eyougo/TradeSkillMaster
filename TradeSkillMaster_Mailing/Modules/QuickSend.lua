@@ -10,8 +10,7 @@ local TSM = select(2, ...)
 local QuickSend = TSM:NewModule("QuickSend", "AceEvent-3.0")
 local L = LibStub("AceLocale-3.0"):GetLocale("TradeSkillMaster_Mailing") -- loads the localization table
 
-local private = {itemLink=nil, quantity=0, target="", cod=0}
-
+local private = {itemLink=nil, quantity=0, target="", cod=0, money=0}
 
 function QuickSend:CreateTab(parent)
 	local frame = CreateFrame("Frame", nil, parent)
@@ -99,8 +98,34 @@ function QuickSend:CreateTab(parent)
 		end)
 	TSMAPI.GUI:SetAutoComplete(targetBox, AUTOCOMPLETE_LIST.MAIL)
 	targetBox.tooltip = L["Enter the name of the player you want to send this item to."].."\n\n"..TSM.SPELLING_WARNING
-	
-	
+
+	local characterList = {}
+	local player = UnitName("player")
+	for character in pairs(TSMAPI:GetCharacters()) do
+		if not TSMAPI:IsPlayer(character) then
+			tinsert(characterList, character)
+		end
+	end
+	local numFriends = GetNumFriends()
+	for i = 1, numFriends do
+		local name, _, _, _, _ = GetFriendInfo(i)
+		tinsert(characterList, name)
+	end
+
+	local targetDropdown = TSMAPI.GUI:CreateDropdown(frame, characterList)
+	targetDropdown:SetPoint("TOPLEFT", targetBoxLabel, "TOPRIGHT", 5, 0)
+	targetDropdown:SetWidth(110)
+	targetDropdown:SetHeight(20)
+	targetDropdown:SetCallback("OnValueChanged", function(self, _, value)
+		     self:SetText("")
+			 private.target = characterList[value]
+			 targetBox:SetText(private.target)
+			 private.btn:Update()
+         end)
+	targetDropdown.text:Hide()
+	targetDropdown.dropdown:SetBackdropColor(0,0,0,0)
+	targetDropdown.dropdown:SetBackdropBorderColor(0,0,0,0)
+
 	local qtyBoxLabel = TSMAPI.GUI:CreateLabel(frame, "small")
 	qtyBoxLabel:SetPoint("TOPLEFT", targetBox, "TOPRIGHT", 20, 0)
 	qtyBoxLabel:SetHeight(20)
@@ -129,70 +154,115 @@ function QuickSend:CreateTab(parent)
 		end)
 	qtyBox.tooltip = L["This is the maximum number of the specified item to send when you click the button below. Setting this to 0 will send ALL items."]
 	frame.qtyBox = qtyBox
-	
-	
+
+	local moneyBoxLabel = TSMAPI.GUI:CreateLabel(frame, "small")
+	moneyBoxLabel:SetPoint("TOPLEFT", 5, -125)
+	moneyBoxLabel:SetHeight(20)
+	moneyBoxLabel:SetJustifyV("CENTER")
+	moneyBoxLabel:SetJustifyH("LEFT")
+	moneyBoxLabel:SetText(L["Send Money:"])
+
+	local moneyBox = TSMAPI.GUI:CreateInputBox(frame)
+	moneyBox:SetPoint("TOPLEFT", moneyBoxLabel, "TOPRIGHT", 5, 0)
+	moneyBox:SetPoint("TOPRIGHT", -5, -125)
+	moneyBox:SetHeight(20)
+	moneyBox:SetText(TSMAPI:FormatTextMoney(private.money))
+	moneyBox:SetScript("OnEnterPressed", function(self)
+		local copper = TSMAPI:UnformatTextMoney(self:GetText():trim())
+		if copper then
+			private.money = copper
+			self:SetText(TSMAPI:FormatTextMoney(copper))
+			if copper > 0 then
+				private.cod = 0
+				frame.codBox:SetText(TSMAPI:FormatTextMoney(private.cod))
+			end
+			self:ClearFocus()
+			private.btn:Update()
+		else
+			self:SetFocus()
+		end
+	end)
+	frame.moneyBox = moneyBox
+
 	local codBoxLabel = TSMAPI.GUI:CreateLabel(frame, "small")
-	codBoxLabel:SetPoint("TOPLEFT", 5, -125)
+	codBoxLabel:SetPoint("TOPLEFT", 5, -155)
 	codBoxLabel:SetHeight(20)
 	codBoxLabel:SetJustifyV("CENTER")
 	codBoxLabel:SetJustifyH("LEFT")
 	codBoxLabel:SetText(L["COD Amount (per Item):"])
-	
+
 	local codBox = TSMAPI.GUI:CreateInputBox(frame)
 	codBox:SetPoint("TOPLEFT", codBoxLabel, "TOPRIGHT", 5, 0)
-	codBox:SetPoint("TOPRIGHT", -5, -125)
+	codBox:SetPoint("TOPRIGHT", -5, -155)
 	codBox:SetHeight(20)
 	codBox:SetText(TSMAPI:FormatTextMoney(private.cod))
 	codBox:SetScript("OnEnterPressed", function(self)
-			local copper = TSMAPI:UnformatTextMoney(self:GetText():trim())
-			if copper then
-				private.cod = copper
-				self:SetText(TSMAPI:FormatTextMoney(copper))
-				self:ClearFocus()
-				private.btn:Update()
-			else
-				self:SetFocus()
+		local copper = TSMAPI:UnformatTextMoney(self:GetText():trim())
+		if copper then
+			private.cod = copper
+			self:SetText(TSMAPI:FormatTextMoney(copper))
+			if copper > 0 then
+				private.money = 0
+				frame.moneyBox:SetText(TSMAPI:FormatTextMoney(private.money))
 			end
-		end)
+			self:ClearFocus()
+			private.btn:Update()
+		else
+			self:SetFocus()
+		end
+	end)
 	codBox.tooltip = L["Enter the desired COD amount (per item) to send this item with. Setting this to '0c' will result in no COD being set."]
 	frame.codBox = codBox
 	
-	
 	local function OnClick()
 		local itemString = TSMAPI:GetItemString(private.itemLink)
-		local numHave = 0
-		for _, _, iString, quantity in TSMAPI:GetBagIterator() do
-			if iString == itemString then
-				numHave = numHave + quantity
+		local items = {}
+		if itemString then
+			local numHave = 0
+			for _, _, iString, quantity in TSMAPI:GetBagIterator() do
+				if iString == itemString then
+					numHave = numHave + quantity
+				end
 			end
-		end
-		local quantity
-		if private.quantity == 0 then
-			quantity = numHave
-		else
-			quantity = min(private.quantity, numHave)
+			local quantity
+			if private.quantity == 0 then
+				quantity = numHave
+			else
+				quantity = min(private.quantity, numHave)
+			end
+			items = {[itemString]=quantity}
 		end
 		
-		TSM.AutoMail:SendItems({[itemString]=quantity}, private.target, private.SendCallback, private.cod > 0 and private.cod)
+		TSM.AutoMail:SendItems(items, private.target, private.SendCallback, private.cod > 0 and private.cod, private.money)
 		private.btn:SetText(L["Sending..."])
 		private.btn:Disable()
 	end
 	
 	local btn = TSMAPI.GUI:CreateButton(frame, 15)
-	btn:SetPoint("TOPLEFT", 5, -155)
-	btn:SetPoint("TOPRIGHT", -5, -155)
+	btn:SetPoint("TOPLEFT", 5, -185)
+	btn:SetPoint("TOPRIGHT", -5, -185)
 	btn:SetHeight(40)
 	btn:GetFontString():SetWidth(btn:GetWidth())
 	btn:GetFontString():SetHeight(btn:GetHeight())
 	btn:SetScript("OnClick", OnClick)
 	btn.tooltip = L["Click this button to send off the item to the specified character."]
 	btn.Update = function(self)
-		if not private.itemLink then
-			self:Disable()
-			self:SetText(L["No Item Specified"])
-		elseif private.target == "" then
+		if private.target == "" then
 			self:Disable()
 			self:SetText(L["No Target Specified"])
+		elseif not private.itemLink and private.money and private.money > 0 then
+			self:Enable()
+			self:SetText(format(L["Send money %s to %s"], TSMAPI:FormatTextMoney(private.money), private.target))
+		elseif not private.itemLink then
+			self:Disable()
+			self:SetText(L["No Item Specified"])
+		elseif private.money and private.money> 0 then
+			self:Enable()
+			if private.quantity == 0 then
+				self:SetText(format(L["Send all %s money %s to %s"], private.itemLink, TSMAPI:FormatTextMoney(private.money), private.target))
+			else
+				self:SetText(format(L["Send %sx%d money %s to %s"], private.itemLink, private.quantity, TSMAPI:FormatTextMoney(private.money), private.target))
+			end
 		else
 			self:Enable()
 			if private.cod > 0 then
